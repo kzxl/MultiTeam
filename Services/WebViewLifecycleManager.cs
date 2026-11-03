@@ -25,6 +25,7 @@ namespace MultiTeam.Services
         private readonly Dictionary<string, DateTime> _lastActiveTimes = new();
         private readonly Dictionary<string, TeamAccount> _trackedAccounts = new();
         private readonly DispatcherTimer _inactivityTimer;
+        private int _autoTrimTickCount = 0;
 
         public bool IsAutoSleepEnabled { get; set; } = true;
         public TimeSpan InactivitySuspendThreshold { get; set; } = TimeSpan.FromMinutes(10);
@@ -112,7 +113,15 @@ namespace MultiTeam.Services
             try
             {
                 string profileFolder = _accountStore.GetProfileFolder(account.Id);
-                var env = await CoreWebView2Environment.CreateAsync(userDataFolder: profileFolder);
+                var envOptions = new CoreWebView2EnvironmentOptions
+                {
+                    AdditionalBrowserArguments = 
+                        "--js-flags=\"--max-old-space-size=256\" " +
+                        "--renderer-process-limit=6 " +
+                        "--disable-features=Translate,MediaRouter,OptimizationHints " +
+                        "--enable-features=WebContentsDiscard,MDocPreload"
+                };
+                var env = await CoreWebView2Environment.CreateAsync(userDataFolder: profileFolder, options: envOptions);
                 await webView.EnsureCoreWebView2Async(env);
 
                 string accountId = account.Id;
@@ -261,19 +270,49 @@ namespace MultiTeam.Services
             }
         }
 
+        public int HibernateAllBackgroundAccounts(List<TeamAccount> allAccounts)
+        {
+            int count = 0;
+            var accountsToHibernate = _webViews.Keys.Where(id => id != _currentActiveAccountId).ToList();
+
+            foreach (var accId in accountsToHibernate)
+            {
+                var account = allAccounts.FirstOrDefault(a => a.Id == accId);
+                if (account != null)
+                {
+                    HibernateAccount(account);
+                    count++;
+                }
+            }
+
+            TrimMemory();
+            return count;
+        }
+
         public long TrimMemory()
         {
             long beforeBytes = GetTotalMemoryUsageBytes();
 
             try
             {
-                // 1. Force full garbage collection
+                // 1. Force full garbage collection for WPF host
                 GC.Collect(2, GCCollectionMode.Forced, true, true);
                 GC.WaitForPendingFinalizers();
                 GC.Collect(2, GCCollectionMode.Forced, true, true);
 
-                // 2. Win32 EmptyWorkingSet
+                // 2. Win32 EmptyWorkingSet on host WPF process
                 SetProcessWorkingSetSize(Process.GetCurrentProcess().Handle, (IntPtr)(-1), (IntPtr)(-1));
+
+                // 3. Win32 EmptyWorkingSet on ALL child msedgewebview2 processes (Renderers, Workers, GPU, Network)
+                var webviewProcesses = Process.GetProcessesByName("msedgewebview2");
+                foreach (var p in webviewProcesses)
+                {
+                    try
+                    {
+                        SetProcessWorkingSetSize(p.Handle, (IntPtr)(-1), (IntPtr)(-1));
+                    }
+                    catch { }
+                }
             }
             catch { }
 
@@ -378,7 +417,16 @@ namespace MultiTeam.Services
                 }
             }
 
-            MemoryUsageUpdated?.Invoke(GetTotalMemoryUsageBytes());
+            _autoTrimTickCount++;
+            if (_autoTrimTickCount >= 4) // Periodic auto-trim every 2 minutes (4 * 30s)
+            {
+                _autoTrimTickCount = 0;
+                TrimMemory();
+            }
+            else
+            {
+                MemoryUsageUpdated?.Invoke(GetTotalMemoryUsageBytes());
+            }
         }
 
         public void Dispose()

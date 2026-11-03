@@ -888,6 +888,14 @@ namespace MultiTeam
             }
         }
 
+        private void MenuItemHibernateAllBackground_Click(object sender, RoutedEventArgs e)
+        {
+            int count = _lifecycleManager.HibernateAllBackgroundAccounts(_allAccounts);
+            long totalBytes = _lifecycleManager.GetTotalMemoryUsageBytes();
+            double mb = totalBytes / (1024.0 * 1024.0);
+            TxtStatus.Text = $"Đã ngủ đông {count} tab nền. RAM còn: {mb:N0} MB.";
+        }
+
         private async void MenuItemWakeup_Click(object sender, RoutedEventArgs e)
         {
             if (sender is MenuItem menuItem && menuItem.DataContext is TeamAccount account)

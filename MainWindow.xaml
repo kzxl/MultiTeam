@@ -599,8 +599,14 @@
                             <!-- Memory Monitor & Trim RAM Button -->
                             <Button x:Name="BtnTrimMemory" 
                                     Style="{StaticResource TopBarButtonStyle}" 
-                                    ToolTip="Giải phóng RAM ngay (EmptyWorkingSet &amp; Trim WebView2)" 
+                                    ToolTip="Click: Dọn RAM ngay (Working Set Trim) | Chuột phải: Tùy chọn ngủ đông tab nền" 
                                     Click="BtnTrimMemory_Click">
+                                <Button.ContextMenu>
+                                    <ContextMenu Background="#1e293b" Foreground="#f8fafc" BorderBrush="#334155">
+                                        <MenuItem Header="⚡ Dọn RAM tức thì (Working Set Trim)" Click="BtnTrimMemory_Click"/>
+                                        <MenuItem Header="💤 Ngủ đông tất cả tab nền (Thu hồi 100% RAM nền)" Click="MenuItemHibernateAllBackground_Click"/>
+                                    </ContextMenu>
+                                </Button.ContextMenu>
                                 <StackPanel Orientation="Horizontal">
                                     <TextBlock x:Name="TxtMemoryUsage" Text="📊 RAM: -- MB" FontSize="11" FontWeight="SemiBold" Foreground="#38bdf8" VerticalAlignment="Center" Margin="0,0,6,0"/>
                                     <TextBlock x:Name="TxtTrimMemoryLabel" Text="⚡ Dọn RAM" FontSize="12" FontWeight="SemiBold" Foreground="#f8fafc" VerticalAlignment="Center"/>
