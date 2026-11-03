@@ -6,7 +6,6 @@
         xmlns:local="clr-namespace:MultiTeam"
         mc:Ignorable="d"
         Title="MultiTeam Hub" 
-        Icon="app.ico"
         Height="820" Width="1340"
         MinHeight="640" MinWidth="1000"
         WindowStartupLocation="CenterScreen"

@@ -140,9 +140,16 @@ namespace MultiTeam.Services
 
         private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
         {
+            if (msg == (int)App.WM_SHOW_MULTITEAM)
+            {
+                _onRestore();
+                handled = true;
+                return IntPtr.Zero;
+            }
+
             if (msg == WM_TRAYICON)
             {
-                int mouseMsg = lParam.ToInt32();
+                long mouseMsg = lParam.ToInt64() & 0xFFFF;
                 if (mouseMsg == WM_LBUTTONDBLCLK || mouseMsg == WM_LBUTTONUP)
                 {
                     _onRestore();

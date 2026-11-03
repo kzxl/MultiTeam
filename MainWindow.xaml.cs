@@ -37,6 +37,17 @@ namespace MultiTeam
         public MainWindow()
         {
             InitializeComponent();
+
+            try
+            {
+                string iconPath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "app.ico");
+                if (System.IO.File.Exists(iconPath))
+                {
+                    Icon = System.Windows.Media.Imaging.BitmapFrame.Create(new Uri(iconPath, UriKind.Absolute));
+                }
+            }
+            catch { }
+
             _accountStore = new AccountStore();
             _notificationManager = new NotificationManager(this, async acc => await SelectAccountAsync(acc));
 
@@ -47,6 +58,9 @@ namespace MultiTeam
                     Show();
                     WindowState = WindowState.Normal;
                     Activate();
+                    Topmost = true;
+                    Topmost = false;
+                    Focus();
                 },
                 onExit: () =>
                 {
