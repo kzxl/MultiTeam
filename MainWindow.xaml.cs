@@ -28,6 +28,7 @@ namespace MultiTeam
         private readonly List<TeamAccount> _allAccounts = new();
         private readonly ObservableCollection<AccountGroup> _accountGroups = new();
         private TeamAccount? _activeAccount;
+        private string? _lastNotifiedAccountId;
 
         public bool IsSidebarCollapsed { get; set; } = false;
 
@@ -48,24 +49,43 @@ namespace MultiTeam
             catch { }
 
             _accountStore = new AccountStore();
-            _notificationManager = new NotificationManager(this, async acc => await SelectAccountAsync(acc));
+            _notificationManager = new NotificationManager(
+                this, 
+                async acc => await SelectAccountAsync(acc),
+                accId => _activeAccount?.Id == accId);
             _lifecycleManager = new WebViewLifecycleManager(WebViewsContainer, _accountStore);
 
-            _lifecycleManager.NotificationReceived += (account, title, body) =>
-            {
-                Dispatcher.Invoke(() => _notificationManager.HandleNotificationReceived(account, title, body));
-            };
-
-            _lifecycleManager.TitleChanged += (account, title) =>
-            {
-                Dispatcher.Invoke(() => UpdateUnreadCountFromTitle(account, title));
-            };
-
-            _lifecycleManager.NavigationStateChanged += (account, isSuccess) =>
+            _lifecycleManager.NotificationReceived += (accountId, title, body) =>
             {
                 Dispatcher.Invoke(() =>
                 {
-                    if (_activeAccount?.Id == account.Id)
+                    var acc = _allAccounts.FirstOrDefault(a => a.Id == accountId);
+                    if (acc != null)
+                    {
+                        _lastNotifiedAccountId = accountId;
+                        _notificationManager.HandleNotificationReceived(acc, title, body);
+                        UpdateHubUnreadState();
+                    }
+                });
+            };
+
+            _lifecycleManager.TitleChanged += (accountId, title) =>
+            {
+                Dispatcher.Invoke(() =>
+                {
+                    var acc = _allAccounts.FirstOrDefault(a => a.Id == accountId);
+                    if (acc != null)
+                    {
+                        UpdateUnreadCountFromTitle(acc, title);
+                    }
+                });
+            };
+
+            _lifecycleManager.NavigationStateChanged += (accountId, isSuccess) =>
+            {
+                Dispatcher.Invoke(() =>
+                {
+                    if (_activeAccount?.Id == accountId)
                     {
                         TxtStatus.Text = isSuccess ? _loc["Ready"] : _loc["ConnectionError"];
                     }
@@ -253,10 +273,28 @@ namespace MultiTeam
         {
             _activeAccount = account;
 
+            // Clear unread count for the active chat being viewed
+            account.UnreadCount = 0;
+            if (_lastNotifiedAccountId == account.Id)
+            {
+                _lastNotifiedAccountId = null;
+            }
+
             foreach (var acc in _allAccounts)
             {
                 acc.IsActive = (acc.Id == account.Id);
             }
+
+            // Update parent group state
+            foreach (var group in _accountGroups)
+            {
+                if (group.Accounts.Any(a => a.Id == account.Id))
+                {
+                    group.NotifyStateChanged();
+                }
+            }
+
+            UpdateHubUnreadState();
 
             TxtActiveAccountName.Text = $"{account.Name} ({account.PlatformDisplayName})";
             EmptyStatePanel.Visibility = Visibility.Collapsed;
@@ -292,29 +330,32 @@ namespace MultiTeam
         {
             if (string.IsNullOrWhiteSpace(title)) return 0;
 
-            // Pattern 1: Parentheses with number: (3), (99+), (100)
-            var matchParen = Regex.Match(title, @"\((?<count>\d+)\+?\)");
-            if (matchParen.Success && int.TryParse(matchParen.Groups["count"].Value, out int countParen))
+            // Pattern 1: Count in parens/brackets at the START of the title:
+            // E.g. "(3) Microsoft Teams", "[2] Slack", "• (1) Discord", "*(5) Teams", "(99+) Zalo Web"
+            var matchPrefix = Regex.Match(title, @"^\s*[\(•\*\s]*[\(\[](?<count>\d+)\+?[\)\]]");
+            if (matchPrefix.Success && int.TryParse(matchPrefix.Groups["count"].Value, out int countPrefix))
             {
-                return countParen;
+                return countPrefix;
             }
 
-            // Pattern 2: Square brackets: [3], [99+]
-            var matchBracket = Regex.Match(title, @"\[(?<count>\d+)\+?\]");
-            if (matchBracket.Success && int.TryParse(matchBracket.Groups["count"].Value, out int countBracket))
+            // Pattern 2: Count immediately following known platform name at start:
+            // E.g. "Telegram (15)", "Telegram Web (4)", "Zalo (5)", "Skype (1)", "WhatsApp (2)"
+            var matchPlatform = Regex.Match(title, @"^(Teams|Zalo|Telegram|Messenger|WhatsApp|Slack|Discord|Skype|Google Chat|Chat)(\s+Web)?\s*[\(\[](?<count>\d+)\+?[\)\]]", RegexOptions.IgnoreCase);
+            if (matchPlatform.Success && int.TryParse(matchPlatform.Groups["count"].Value, out int countPlatform))
             {
-                return countBracket;
+                return countPlatform;
             }
 
-            // Pattern 3: Text pattern: "5 unread", "5 tin nhắn", "5 tin mới", "5 messages"
-            var matchText = Regex.Match(title, @"(?<count>\d+)\+?\s*(unread|tin nhắn|tin mới|messages)", RegexOptions.IgnoreCase);
-            if (matchText.Success && int.TryParse(matchText.Groups["count"].Value, out int countText))
+            // Pattern 3: Zalo / Web notification text alternation (e.g. "Tin nhắn mới từ Nam", "Bạn có tin nhắn mới")
+            if (title.StartsWith("Tin nhắn mới", StringComparison.OrdinalIgnoreCase) ||
+                title.StartsWith("Bạn có tin nhắn", StringComparison.OrdinalIgnoreCase) ||
+                title.StartsWith("New message", StringComparison.OrdinalIgnoreCase))
             {
-                return countText;
+                return 1;
             }
 
-            // Pattern 4: Bullet • or asterisk * indicating unread activity (common in Slack, Discord, Teams)
-            if (title.StartsWith("•") || title.StartsWith("*") || title.Contains(" • ") || title.Contains(" * "))
+            // Pattern 4: Standalone unread indicator bullets at start (Discord, Slack: "• Discord", "* Slack")
+            if (Regex.IsMatch(title, @"^\s*[•\*]\s*(Discord|Slack|Teams)"))
             {
                 return 1;
             }
@@ -326,19 +367,37 @@ namespace MultiTeam
         {
             int newCount = ParseUnreadCountFromTitle(title);
 
-            account.UnreadCount = newCount;
-            _notificationManager.HandleUnreadCountChanged(account, newCount);
-
-            // Update parent group state
-            foreach (var group in _accountGroups)
+            // If user is currently looking at this active account and window is active,
+            // don't show unread badges or trigger toasts for the tab they are already viewing
+            bool isCurrentActiveChat = (_activeAccount?.Id == account.Id && IsActive && WindowState != WindowState.Minimized);
+            if (isCurrentActiveChat)
             {
-                if (group.Accounts.Contains(account))
-                {
-                    group.NotifyStateChanged();
-                }
+                account.UnreadCount = 0;
+                UpdateHubUnreadState();
+                return;
             }
 
-            UpdateHubUnreadState();
+            // Only update if count changed
+            if (account.UnreadCount != newCount)
+            {
+                account.UnreadCount = newCount;
+                if (newCount > 0)
+                {
+                    _lastNotifiedAccountId = account.Id;
+                }
+                _notificationManager.HandleUnreadCountChanged(account, newCount);
+
+                // Update parent group state
+                foreach (var group in _accountGroups)
+                {
+                    if (group.Accounts.Any(a => a.Id == account.Id))
+                    {
+                        group.NotifyStateChanged();
+                    }
+                }
+
+                UpdateHubUnreadState();
+            }
         }
 
         public void UpdateHubUnreadState()
@@ -362,6 +421,18 @@ namespace MultiTeam
 
         private async void HubUnreadBadge_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         {
+            // 1. Try to switch to the account that most recently received a message
+            if (!string.IsNullOrEmpty(_lastNotifiedAccountId))
+            {
+                var recent = _allAccounts.FirstOrDefault(a => a.Id == _lastNotifiedAccountId && a.HasUnread);
+                if (recent != null && recent.Id != _activeAccount?.Id)
+                {
+                    await SelectAccountAsync(recent);
+                    return;
+                }
+            }
+
+            // 2. Otherwise switch to any account with unread messages
             var unreadAccount = _allAccounts.FirstOrDefault(a => a.HasUnread && a.Id != _activeAccount?.Id) 
                                 ?? _allAccounts.FirstOrDefault(a => a.HasUnread);
             if (unreadAccount != null)

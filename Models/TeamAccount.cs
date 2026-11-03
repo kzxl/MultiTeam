@@ -277,5 +277,19 @@ namespace MultiTeam.Models
         {
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
         }
+
+        public override bool Equals(object? obj)
+        {
+            if (obj is TeamAccount other)
+            {
+                return string.Equals(Id, other.Id, StringComparison.Ordinal);
+            }
+            return false;
+        }
+
+        public override int GetHashCode()
+        {
+            return Id?.GetHashCode() ?? 0;
+        }
     }
 }

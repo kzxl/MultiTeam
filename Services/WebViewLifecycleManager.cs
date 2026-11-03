@@ -30,9 +30,9 @@ namespace MultiTeam.Services
         public TimeSpan InactivitySuspendThreshold { get; set; } = TimeSpan.FromMinutes(10);
         public TimeSpan InactivityHibernateThreshold { get; set; } = TimeSpan.FromMinutes(30);
 
-        public event Action<TeamAccount, string, string>? NotificationReceived;
-        public event Action<TeamAccount, string>? TitleChanged;
-        public event Action<TeamAccount, bool>? NavigationStateChanged;
+        public event Action<string, string, string>? NotificationReceived;
+        public event Action<string, string>? TitleChanged;
+        public event Action<string, bool>? NavigationStateChanged;
         public event Action<string, Exception?>? InitializationError;
         public event Action<long>? MemoryUsageUpdated;
 
@@ -87,16 +87,6 @@ namespace MultiTeam.Services
             {
                 bool isTarget = (kvp.Key == account.Id);
                 kvp.Value.Visibility = isTarget ? Visibility.Visible : Visibility.Collapsed;
-
-                if (!isTarget && IsAutoSleepEnabled)
-                {
-                    // If memory saver is active, suspend non-active tabs
-                    try
-                    {
-                        _ = kvp.Value.CoreWebView2?.TrySuspendAsync();
-                    }
-                    catch { }
-                }
             }
 
             return webView;
@@ -125,6 +115,8 @@ namespace MultiTeam.Services
                 var env = await CoreWebView2Environment.CreateAsync(userDataFolder: profileFolder);
                 await webView.EnsureCoreWebView2Async(env);
 
+                string accountId = account.Id;
+
                 // Auto-allow notifications, microphone, camera
                 webView.CoreWebView2.PermissionRequested += (s, args) =>
                 {
@@ -141,9 +133,10 @@ namespace MultiTeam.Services
                 {
                     webView.CoreWebView2.NotificationReceived += (s, args) =>
                     {
+                        _lastActiveTimes[accountId] = DateTime.Now;
                         string title = args.Notification.Title ?? string.Empty;
                         string body = args.Notification.Body ?? string.Empty;
-                        NotificationReceived?.Invoke(account, title, body);
+                        NotificationReceived?.Invoke(accountId, title, body);
                     };
                 }
                 catch { }
@@ -151,18 +144,19 @@ namespace MultiTeam.Services
                 // Title tracking
                 webView.CoreWebView2.DocumentTitleChanged += (s, args) =>
                 {
-                    TitleChanged?.Invoke(account, webView.CoreWebView2.DocumentTitle ?? string.Empty);
+                    _lastActiveTimes[accountId] = DateTime.Now;
+                    TitleChanged?.Invoke(accountId, webView.CoreWebView2.DocumentTitle ?? string.Empty);
                 };
 
                 // Navigation status
                 webView.NavigationStarting += (s, args) =>
                 {
-                    NavigationStateChanged?.Invoke(account, false);
+                    NavigationStateChanged?.Invoke(accountId, false);
                 };
 
                 webView.NavigationCompleted += (s, args) =>
                 {
-                    NavigationStateChanged?.Invoke(account, args.IsSuccess);
+                    NavigationStateChanged?.Invoke(accountId, args.IsSuccess);
                 };
 
                 // External link handler
