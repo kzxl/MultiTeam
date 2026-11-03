@@ -153,7 +153,8 @@ namespace MultiTeam.Services
                 ["TrimMemorySuccess"] = "Đã dọn dẹp RAM! Giải phóng {0:N0} MB bộ nhớ.",
                 ["HibernateAccount"] = "💤 Cho vào chế độ ngủ đông (Giải phóng RAM)",
                 ["WakeupAccount"] = "⚡ Đánh thức tài khoản",
-                ["AccountHibernatedMsg"] = "Tài khoản '{0}' đã được đưa vào chế độ ngủ đông và giải phóng toàn bộ tài nguyên RAM."
+                ["AccountHibernatedMsg"] = "Tài khoản '{0}' đã được đưa vào chế độ ngủ đông và giải phóng toàn bộ tài nguyên RAM.",
+                ["UnreadMessagesSuffix"] = "tin mới"
             },
             ["en"] = new Dictionary<string, string>
             {
@@ -210,7 +211,8 @@ namespace MultiTeam.Services
                 ["TrimMemorySuccess"] = "Memory optimized! Freed {0:N0} MB of RAM.",
                 ["HibernateAccount"] = "💤 Hibernate Account (Free RAM)",
                 ["WakeupAccount"] = "⚡ Wake up Account",
-                ["AccountHibernatedMsg"] = "Account '{0}' has been put into hibernation. All RAM resources were released."
+                ["AccountHibernatedMsg"] = "Account '{0}' has been put into hibernation. All RAM resources were released.",
+                ["UnreadMessagesSuffix"] = "new messages"
             }
         };
 

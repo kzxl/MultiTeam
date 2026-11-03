@@ -156,6 +156,7 @@ namespace MultiTeam
 
             UpdateMemorySaverButtonText();
             UpdateMuteButtonState();
+            UpdateHubUnreadState();
 
             if (_activeAccount != null)
             {
@@ -287,17 +288,43 @@ namespace MultiTeam
                 : new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(203, 213, 225));
         }
 
+        public static int ParseUnreadCountFromTitle(string title)
+        {
+            if (string.IsNullOrWhiteSpace(title)) return 0;
+
+            // Pattern 1: Parentheses with number: (3), (99+), (100)
+            var matchParen = Regex.Match(title, @"\((?<count>\d+)\+?\)");
+            if (matchParen.Success && int.TryParse(matchParen.Groups["count"].Value, out int countParen))
+            {
+                return countParen;
+            }
+
+            // Pattern 2: Square brackets: [3], [99+]
+            var matchBracket = Regex.Match(title, @"\[(?<count>\d+)\+?\]");
+            if (matchBracket.Success && int.TryParse(matchBracket.Groups["count"].Value, out int countBracket))
+            {
+                return countBracket;
+            }
+
+            // Pattern 3: Text pattern: "5 unread", "5 tin nhắn", "5 tin mới", "5 messages"
+            var matchText = Regex.Match(title, @"(?<count>\d+)\+?\s*(unread|tin nhắn|tin mới|messages)", RegexOptions.IgnoreCase);
+            if (matchText.Success && int.TryParse(matchText.Groups["count"].Value, out int countText))
+            {
+                return countText;
+            }
+
+            // Pattern 4: Bullet • or asterisk * indicating unread activity (common in Slack, Discord, Teams)
+            if (title.StartsWith("•") || title.StartsWith("*") || title.Contains(" • ") || title.Contains(" * "))
+            {
+                return 1;
+            }
+
+            return 0;
+        }
+
         private void UpdateUnreadCountFromTitle(TeamAccount account, string title)
         {
-            int newCount = 0;
-            if (!string.IsNullOrEmpty(title))
-            {
-                var match = Regex.Match(title, @"\((\d+)\)");
-                if (match.Success && int.TryParse(match.Groups[1].Value, out int count))
-                {
-                    newCount = count;
-                }
-            }
+            int newCount = ParseUnreadCountFromTitle(title);
 
             account.UnreadCount = newCount;
             _notificationManager.HandleUnreadCountChanged(account, newCount);
@@ -309,6 +336,37 @@ namespace MultiTeam
                 {
                     group.NotifyStateChanged();
                 }
+            }
+
+            UpdateHubUnreadState();
+        }
+
+        public void UpdateHubUnreadState()
+        {
+            int totalHubUnread = _allAccounts.Sum(a => a.UnreadCount);
+
+            if (totalHubUnread > 0)
+            {
+                Title = $"({totalHubUnread}) {_loc["AppTitle"]}";
+                HubUnreadBadge.Visibility = Visibility.Visible;
+                TxtHubUnreadCount.Text = $"{totalHubUnread} {_loc["UnreadMessagesSuffix"]}";
+                _trayIcon.UpdateTooltip($"{_loc["AppTitle"]} - {totalHubUnread} {_loc["UnreadMessagesSuffix"]}");
+            }
+            else
+            {
+                Title = _loc["AppTitle"];
+                HubUnreadBadge.Visibility = Visibility.Collapsed;
+                _trayIcon.UpdateTooltip(_loc["AppTitle"]);
+            }
+        }
+
+        private async void HubUnreadBadge_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            var unreadAccount = _allAccounts.FirstOrDefault(a => a.HasUnread && a.Id != _activeAccount?.Id) 
+                                ?? _allAccounts.FirstOrDefault(a => a.HasUnread);
+            if (unreadAccount != null)
+            {
+                await SelectAccountAsync(unreadAccount);
             }
         }
 

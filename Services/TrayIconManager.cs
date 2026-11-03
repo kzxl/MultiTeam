@@ -138,6 +138,24 @@ namespace MultiTeam.Services
             _isAdded = true;
         }
 
+        public void UpdateTooltip(string tooltip)
+        {
+            if (!_isAdded) return;
+            var helper = new WindowInteropHelper(_window);
+            if (helper.Handle == IntPtr.Zero) return;
+
+            var data = new NOTIFYICONDATA
+            {
+                cbSize = Marshal.SizeOf(typeof(NOTIFYICONDATA)),
+                hWnd = helper.Handle,
+                uID = TRAY_ID,
+                uFlags = NIF_TIP,
+                szTip = tooltip.Length > 120 ? tooltip.Substring(0, 120) : tooltip
+            };
+
+            Shell_NotifyIcon(NIM_MODIFY, ref data);
+        }
+
         private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
         {
             if (msg == (int)App.WM_SHOW_MULTITEAM)
