@@ -22,16 +22,15 @@ namespace MultiTeam
         private readonly AccountStore _accountStore;
         private readonly NotificationManager _notificationManager;
         private readonly TrayIconManager _trayIcon;
+        private readonly WebViewLifecycleManager _lifecycleManager;
         private readonly LocalizationManager _loc = LocalizationManager.Instance;
 
         private readonly List<TeamAccount> _allAccounts = new();
         private readonly ObservableCollection<AccountGroup> _accountGroups = new();
-        private readonly Dictionary<string, WebView2> _webViews = new();
         private TeamAccount? _activeAccount;
 
         public bool IsSidebarCollapsed { get; set; } = false;
 
-        private bool _isMemorySaverEnabled = false;
         private string _selectedTagColor = "#8b5cf6"; // Default: Purple
 
         public MainWindow()
@@ -50,6 +49,43 @@ namespace MultiTeam
 
             _accountStore = new AccountStore();
             _notificationManager = new NotificationManager(this, async acc => await SelectAccountAsync(acc));
+            _lifecycleManager = new WebViewLifecycleManager(WebViewsContainer, _accountStore);
+
+            _lifecycleManager.NotificationReceived += (account, title, body) =>
+            {
+                Dispatcher.Invoke(() => _notificationManager.HandleNotificationReceived(account, title, body));
+            };
+
+            _lifecycleManager.TitleChanged += (account, title) =>
+            {
+                Dispatcher.Invoke(() => UpdateUnreadCountFromTitle(account, title));
+            };
+
+            _lifecycleManager.NavigationStateChanged += (account, isSuccess) =>
+            {
+                Dispatcher.Invoke(() =>
+                {
+                    if (_activeAccount?.Id == account.Id)
+                    {
+                        TxtStatus.Text = isSuccess ? _loc["Ready"] : _loc["ConnectionError"];
+                    }
+                });
+            };
+
+            _lifecycleManager.InitializationError += (accName, ex) =>
+            {
+                Dispatcher.Invoke(() =>
+                {
+                    TxtStatus.Text = _loc["ConnectionError"];
+                    MessageBox.Show($"Failed to initialize WebView2 for '{accName}':\n{ex?.Message}",
+                        "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                });
+            };
+
+            _lifecycleManager.MemoryUsageUpdated += bytes =>
+            {
+                Dispatcher.Invoke(() => UpdateMemoryWidget(bytes));
+            };
 
             _trayIcon = new TrayIconManager(
                 this,
@@ -78,6 +114,7 @@ namespace MultiTeam
         {
             ApplyLocalization();
             LoadAccounts();
+            UpdateMemoryWidget(_lifecycleManager.GetTotalMemoryUsageBytes());
 
             if (_allAccounts.Count > 0)
             {
@@ -104,6 +141,7 @@ namespace MultiTeam
             BtnHome.Content = _loc["Home"];
             TxtFooterLabel.Text = _loc["SessionsFolder"];
             BtnLanguageToggle.Content = _loc.LanguageToggleText;
+            TxtTrimMemoryLabel.Text = _loc["TrimMemoryBtn"];
 
             // Modal texts
             TxtModalTitle.Text = _loc["CreateProfileTitle"];
@@ -142,6 +180,7 @@ namespace MultiTeam
 
         private void MainWindow_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
         {
+            _lifecycleManager.Dispose();
             _trayIcon?.Dispose();
         }
 
@@ -223,29 +262,13 @@ namespace MultiTeam
             BtnMuteToggle.Visibility = Visibility.Visible;
             UpdateMuteButtonState();
 
-            await EnsureWebViewForAccountAsync(account);
+            TxtStatus.Text = _loc["Loading"];
 
-            foreach (var kvp in _webViews)
+            var webView = await _lifecycleManager.ActivateAccountAsync(account);
+            if (webView != null)
             {
-                bool isTarget = (kvp.Key == account.Id);
-                kvp.Value.Visibility = isTarget ? Visibility.Visible : Visibility.Collapsed;
-
-                if (_isMemorySaverEnabled)
-                {
-                    if (isTarget)
-                    {
-                        kvp.Value.CoreWebView2?.Resume();
-                    }
-                    else
-                    {
-                        _ = kvp.Value.CoreWebView2?.TrySuspendAsync();
-                    }
-                }
-            }
-
-            if (_webViews.TryGetValue(account.Id, out var activeWebView))
-            {
-                TxtZoomLevel.Text = $"{(int)(activeWebView.ZoomFactor * 100)}%";
+                TxtZoomLevel.Text = $"{(int)(webView.ZoomFactor * 100)}%";
+                TxtStatus.Text = _loc["Ready"];
             }
         }
 
@@ -257,137 +280,11 @@ namespace MultiTeam
 
         private void UpdateMemorySaverButtonText()
         {
-            BtnMemorySaver.Content = _isMemorySaverEnabled ? _loc["MemorySaverOn"] : _loc["MemorySaverOff"];
-            BtnMemorySaver.Foreground = _isMemorySaverEnabled 
+            bool isAutoSleep = _lifecycleManager.IsAutoSleepEnabled;
+            BtnMemorySaver.Content = isAutoSleep ? _loc["MemorySaverOn"] : _loc["MemorySaverOff"];
+            BtnMemorySaver.Foreground = isAutoSleep 
                 ? new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(16, 185, 129)) 
                 : new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(203, 213, 225));
-        }
-
-        private async Task EnsureWebViewForAccountAsync(TeamAccount account)
-        {
-            if (_webViews.ContainsKey(account.Id))
-            {
-                return;
-            }
-
-            TxtStatus.Text = _loc["Initializing"];
-
-            var webView = new WebView2
-            {
-                HorizontalAlignment = HorizontalAlignment.Stretch,
-                VerticalAlignment = VerticalAlignment.Stretch,
-                Visibility = Visibility.Collapsed
-            };
-
-            WebViewsContainer.Children.Add(webView);
-            _webViews[account.Id] = webView;
-
-            try
-            {
-                string profileFolder = _accountStore.GetProfileFolder(account.Id);
-                var env = await CoreWebView2Environment.CreateAsync(userDataFolder: profileFolder);
-                await webView.EnsureCoreWebView2Async(env);
-
-                // Auto-allow notifications, mic and camera
-                webView.CoreWebView2.PermissionRequested += (s, args) =>
-                {
-                    if (args.PermissionKind == CoreWebView2PermissionKind.Notifications ||
-                        args.PermissionKind == CoreWebView2PermissionKind.Microphone ||
-                        args.PermissionKind == CoreWebView2PermissionKind.Camera)
-                    {
-                        args.State = CoreWebView2PermissionState.Allow;
-                    }
-                };
-
-                // Native Notification listener
-                try
-                {
-                    webView.CoreWebView2.NotificationReceived += (s, args) =>
-                    {
-                        string title = args.Notification.Title ?? string.Empty;
-                        string body = args.Notification.Body ?? string.Empty;
-
-                        _notificationManager.HandleNotificationReceived(account, title, body);
-                    };
-                }
-                catch { }
-
-                // Title tracking for unread badge count
-                webView.CoreWebView2.DocumentTitleChanged += (s, args) =>
-                {
-                    Dispatcher.Invoke(() =>
-                    {
-                        UpdateUnreadCountFromTitle(account, webView.CoreWebView2.DocumentTitle);
-                    });
-                };
-
-                // Status tracking
-                webView.NavigationStarting += (s, args) =>
-                {
-                    if (_activeAccount?.Id == account.Id)
-                    {
-                        TxtStatus.Text = _loc["Loading"];
-                    }
-                };
-
-                webView.NavigationCompleted += (s, args) =>
-                {
-                    if (_activeAccount?.Id == account.Id)
-                    {
-                        TxtStatus.Text = args.IsSuccess ? _loc["Ready"] : _loc["ConnectionError"];
-                    }
-                };
-
-                // Handle external links safely
-                webView.CoreWebView2.NewWindowRequested += (s, args) =>
-                {
-                    string uri = args.Uri ?? string.Empty;
-                    bool isInternal = uri.Contains("teams.microsoft.com", StringComparison.OrdinalIgnoreCase) ||
-                                     uri.Contains("zalo.me", StringComparison.OrdinalIgnoreCase) ||
-                                     uri.Contains("telegram.org", StringComparison.OrdinalIgnoreCase) ||
-                                     uri.Contains("facebook.com", StringComparison.OrdinalIgnoreCase) ||
-                                     uri.Contains("messenger.com", StringComparison.OrdinalIgnoreCase) ||
-                                     uri.Contains("whatsapp.com", StringComparison.OrdinalIgnoreCase) ||
-                                     uri.Contains("discord.com", StringComparison.OrdinalIgnoreCase) ||
-                                     uri.Contains("slack.com", StringComparison.OrdinalIgnoreCase) ||
-                                     uri.Contains("skype.com", StringComparison.OrdinalIgnoreCase) ||
-                                     uri.Contains("google.com", StringComparison.OrdinalIgnoreCase) ||
-                                     uri.Contains("live.com", StringComparison.OrdinalIgnoreCase) ||
-                                     uri.Contains("microsoftonline.com", StringComparison.OrdinalIgnoreCase);
-
-                    // If custom platform, allow custom domain
-                    if (!isInternal && account.Platform == PlatformType.Custom && !string.IsNullOrWhiteSpace(account.CustomUrl))
-                    {
-                        try
-                        {
-                            var customHost = new Uri(account.CustomUrl).Host;
-                            if (uri.Contains(customHost, StringComparison.OrdinalIgnoreCase))
-                            {
-                                isInternal = true;
-                            }
-                        }
-                        catch { }
-                    }
-
-                    if (!isInternal)
-                    {
-                        args.Handled = true;
-                        try
-                        {
-                            Process.Start(new ProcessStartInfo(uri) { UseShellExecute = true });
-                        }
-                        catch { }
-                    }
-                };
-
-                webView.Source = new Uri(account.DefaultUrl);
-            }
-            catch (Exception ex)
-            {
-                TxtStatus.Text = _loc["ConnectionError"];
-                MessageBox.Show($"Failed to initialize WebView2 for '{account.Name}':\n{ex.Message}",
-                    "Error", MessageBoxButton.OK, MessageBoxImage.Error);
-            }
         }
 
         private void UpdateUnreadCountFromTitle(TeamAccount account, string title)
@@ -612,9 +509,35 @@ namespace MultiTeam
 
         #region Zoom, Memory Saver & Navigation
 
+        private void BtnTrimMemory_Click(object sender, RoutedEventArgs e)
+        {
+            long freedBytes = _lifecycleManager.TrimMemory();
+            double freedMb = freedBytes / (1024.0 * 1024.0);
+            TxtStatus.Text = string.Format(_loc["TrimMemorySuccess"], freedMb);
+        }
+
+        private void UpdateMemoryWidget(long totalBytes)
+        {
+            double mb = totalBytes / (1024.0 * 1024.0);
+            TxtMemoryUsage.Text = $"📊 RAM: {mb:N0} MB";
+
+            if (mb > 2000)
+            {
+                TxtMemoryUsage.Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(239, 68, 68)); // Red-500
+            }
+            else if (mb > 1000)
+            {
+                TxtMemoryUsage.Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(245, 158, 11)); // Amber-500
+            }
+            else
+            {
+                TxtMemoryUsage.Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(56, 189, 248)); // Sky-400
+            }
+        }
+
         private void BtnZoomIn_Click(object sender, RoutedEventArgs e)
         {
-            if (_activeAccount != null && _webViews.TryGetValue(_activeAccount.Id, out var wv))
+            if (_activeAccount != null && _lifecycleManager.GetWebView(_activeAccount.Id) is { } wv)
             {
                 wv.ZoomFactor = Math.Min(2.0, Math.Round(wv.ZoomFactor + 0.1, 1));
                 TxtZoomLevel.Text = $"{(int)(wv.ZoomFactor * 100)}%";
@@ -623,7 +546,7 @@ namespace MultiTeam
 
         private void BtnZoomOut_Click(object sender, RoutedEventArgs e)
         {
-            if (_activeAccount != null && _webViews.TryGetValue(_activeAccount.Id, out var wv))
+            if (_activeAccount != null && _lifecycleManager.GetWebView(_activeAccount.Id) is { } wv)
             {
                 wv.ZoomFactor = Math.Max(0.6, Math.Round(wv.ZoomFactor - 0.1, 1));
                 TxtZoomLevel.Text = $"{(int)(wv.ZoomFactor * 100)}%";
@@ -632,33 +555,27 @@ namespace MultiTeam
 
         private void TxtZoomLevel_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         {
-            if (_activeAccount != null && _webViews.TryGetValue(_activeAccount.Id, out var wv))
+            if (_activeAccount != null && _lifecycleManager.GetWebView(_activeAccount.Id) is { } wv)
             {
                 wv.ZoomFactor = 1.0;
                 TxtZoomLevel.Text = "100%";
             }
         }
 
-        private void BtnMemorySaver_Click(object sender, RoutedEventArgs e)
+        private async void BtnMemorySaver_Click(object sender, RoutedEventArgs e)
         {
-            _isMemorySaverEnabled = !_isMemorySaverEnabled;
+            _lifecycleManager.IsAutoSleepEnabled = !_lifecycleManager.IsAutoSleepEnabled;
             UpdateMemorySaverButtonText();
 
-            if (_isMemorySaverEnabled && _activeAccount != null)
+            if (_lifecycleManager.IsAutoSleepEnabled)
             {
-                foreach (var kvp in _webViews)
-                {
-                    if (kvp.Key != _activeAccount.Id)
-                    {
-                        _ = kvp.Value.CoreWebView2?.TrySuspendAsync();
-                    }
-                }
+                await _lifecycleManager.SuspendAllBackgroundAsync(_allAccounts);
             }
         }
 
         private void BtnBack_Click(object sender, RoutedEventArgs e)
         {
-            if (_activeAccount != null && _webViews.TryGetValue(_activeAccount.Id, out var webView))
+            if (_activeAccount != null && _lifecycleManager.GetWebView(_activeAccount.Id) is { } webView)
             {
                 if (webView.CanGoBack) webView.GoBack();
             }
@@ -666,7 +583,7 @@ namespace MultiTeam
 
         private void BtnForward_Click(object sender, RoutedEventArgs e)
         {
-            if (_activeAccount != null && _webViews.TryGetValue(_activeAccount.Id, out var webView))
+            if (_activeAccount != null && _lifecycleManager.GetWebView(_activeAccount.Id) is { } webView)
             {
                 if (webView.CanGoForward) webView.GoForward();
             }
@@ -684,7 +601,7 @@ namespace MultiTeam
 
         private void BtnReload_Click(object sender, RoutedEventArgs e)
         {
-            if (_activeAccount != null && _webViews.TryGetValue(_activeAccount.Id, out var webView))
+            if (_activeAccount != null && _lifecycleManager.GetWebView(_activeAccount.Id) is { } webView)
             {
                 webView.Reload();
             }
@@ -692,7 +609,7 @@ namespace MultiTeam
 
         private void BtnHome_Click(object sender, RoutedEventArgs e)
         {
-            if (_activeAccount != null && _webViews.TryGetValue(_activeAccount.Id, out var webView))
+            if (_activeAccount != null && _lifecycleManager.GetWebView(_activeAccount.Id) is { } webView)
             {
                 webView.CoreWebView2?.Navigate(_activeAccount.DefaultUrl);
             }
@@ -825,6 +742,31 @@ namespace MultiTeam
             }
         }
 
+        private void MenuItemHibernate_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is MenuItem menuItem && menuItem.DataContext is TeamAccount account)
+            {
+                if (_activeAccount?.Id == account.Id)
+                {
+                    MessageBox.Show("Không thể đưa tài khoản đang xem vào chế độ ngủ đông. Hãy chuyển sang tài khoản khác trước.",
+                        "MultiTeam", MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
+
+                _lifecycleManager.HibernateAccount(account);
+                TxtStatus.Text = string.Format(_loc["AccountHibernatedMsg"], account.Name);
+                _lifecycleManager.TrimMemory();
+            }
+        }
+
+        private async void MenuItemWakeup_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is MenuItem menuItem && menuItem.DataContext is TeamAccount account)
+            {
+                await SelectAccountAsync(account);
+            }
+        }
+
         private async void MenuItemClearCache_Click(object sender, RoutedEventArgs e)
         {
             if (sender is MenuItem menuItem && menuItem.DataContext is TeamAccount account)
@@ -838,7 +780,8 @@ namespace MultiTeam
 
                 if (result == MessageBoxResult.Yes)
                 {
-                    if (_webViews.TryGetValue(account.Id, out var webView) && webView.CoreWebView2 != null)
+                    var webView = _lifecycleManager.GetWebView(account.Id);
+                    if (webView?.CoreWebView2 != null)
                     {
                         await webView.CoreWebView2.Profile.ClearBrowsingDataAsync();
                         webView.CoreWebView2.Navigate(account.DefaultUrl);
@@ -906,12 +849,7 @@ namespace MultiTeam
 
                 if (result == MessageBoxResult.Yes)
                 {
-                    if (_webViews.TryGetValue(account.Id, out var webView))
-                    {
-                        WebViewsContainer.Children.Remove(webView);
-                        webView.Dispose();
-                        _webViews.Remove(account.Id);
-                    }
+                    _lifecycleManager.DisposeAccount(account.Id);
 
                     _allAccounts.Remove(account);
                     _accountStore.SaveAccounts(_allAccounts);

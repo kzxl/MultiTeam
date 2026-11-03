@@ -148,7 +148,12 @@ namespace MultiTeam.Services
                 ["EnterCustomUrlWarning"] = "Vui lòng nhập đường dẫn URL hợp lệ bắt đầu bằng https://",
                 ["RenameTitle"] = "Đổi tên tài khoản",
                 ["RenameSubtitle"] = "Nhập tên mới cho tài khoản này:",
-                ["SaveChange"] = "Lưu thay đổi"
+                ["SaveChange"] = "Lưu thay đổi",
+                ["TrimMemoryBtn"] = "⚡ Dọn dẹp RAM",
+                ["TrimMemorySuccess"] = "Đã dọn dẹp RAM! Giải phóng {0:N0} MB bộ nhớ.",
+                ["HibernateAccount"] = "💤 Cho vào chế độ ngủ đông (Giải phóng RAM)",
+                ["WakeupAccount"] = "⚡ Đánh thức tài khoản",
+                ["AccountHibernatedMsg"] = "Tài khoản '{0}' đã được đưa vào chế độ ngủ đông và giải phóng toàn bộ tài nguyên RAM."
             },
             ["en"] = new Dictionary<string, string>
             {
@@ -200,7 +205,12 @@ namespace MultiTeam.Services
                 ["EnterCustomUrlWarning"] = "Please enter a valid URL starting with https://",
                 ["RenameTitle"] = "Rename Account",
                 ["RenameSubtitle"] = "Enter new name for this account:",
-                ["SaveChange"] = "Save Changes"
+                ["SaveChange"] = "Save Changes",
+                ["TrimMemoryBtn"] = "⚡ Trim RAM",
+                ["TrimMemorySuccess"] = "Memory optimized! Freed {0:N0} MB of RAM.",
+                ["HibernateAccount"] = "💤 Hibernate Account (Free RAM)",
+                ["WakeupAccount"] = "⚡ Wake up Account",
+                ["AccountHibernatedMsg"] = "Account '{0}' has been put into hibernation. All RAM resources were released."
             }
         };
 

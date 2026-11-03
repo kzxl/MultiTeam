@@ -367,6 +367,11 @@
                                                                     <!-- Move to Group Menu -->
                                                                     <MenuItem Header="📁 Chuyển vào nhóm..." Click="MenuItemMoveGroup_Click"/>
 
+                                                                    <Separator Background="#334155"/>
+                                                                    <MenuItem Header="💤 Cho vào chế độ ngủ đông (Giải phóng RAM)" Click="MenuItemHibernate_Click"/>
+                                                                    <MenuItem Header="⚡ Đánh thức tài khoản" Click="MenuItemWakeup_Click"/>
+                                                                    <Separator Background="#334155"/>
+
                                                                     <MenuItem Header="🧹 Xóa Cache &amp; Đăng xuất" Click="MenuItemClearCache_Click"/>
                                                                     <MenuItem Header="Đổi tên..." Click="MenuItemRename_Click"/>
                                                                     <MenuItem Header="Mở thư mục dữ liệu" Click="MenuItemOpenFolder_Click"/>
@@ -418,6 +423,11 @@
                                                                                    FontSize="10" 
                                                                                    Foreground="#94a3b8" 
                                                                                    Visibility="{Binding IsMuted, Converter={StaticResource BoolToVis}}"/>
+                                                                        <TextBlock Text="{Binding LifecycleBadge}" 
+                                                                                   FontSize="9.5" 
+                                                                                   ToolTip="{Binding LifecycleStatusText}" 
+                                                                                   Margin="3,0,0,0" 
+                                                                                   VerticalAlignment="Center"/>
                                                                     </StackPanel>
                                                                     <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
                                                                         <Border Background="#1e293b" CornerRadius="3" Padding="4,1" Margin="0,0,5,0">
@@ -552,10 +562,21 @@
                                 </StackPanel>
                             </Border>
 
+                            <!-- Memory Monitor & Trim RAM Button -->
+                            <Button x:Name="BtnTrimMemory" 
+                                    Style="{StaticResource TopBarButtonStyle}" 
+                                    ToolTip="Giải phóng RAM ngay (EmptyWorkingSet &amp; Trim WebView2)" 
+                                    Click="BtnTrimMemory_Click">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock x:Name="TxtMemoryUsage" Text="📊 RAM: -- MB" FontSize="11" FontWeight="SemiBold" Foreground="#38bdf8" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                    <TextBlock x:Name="TxtTrimMemoryLabel" Text="⚡ Dọn RAM" FontSize="12" FontWeight="SemiBold" Foreground="#f8fafc" VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </Button>
+
                             <!-- Memory Saver Toggle Button -->
                             <Button x:Name="BtnMemorySaver" 
                                     Style="{StaticResource TopBarButtonStyle}" 
-                                    Content="⚡ Tiết kiệm RAM: Tắt" 
+                                    Content="⚡ Tiết kiệm RAM: Bật" 
                                     ToolTip="Tự động tạm dừng tài khoản nền để giải phóng RAM" 
                                     Click="BtnMemorySaver_Click"/>
 

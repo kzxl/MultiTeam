@@ -47,10 +47,15 @@ Each account runs within a dedicated, isolated Chromium profile (`userDataFolder
   - Taskbar flashing via Win32 `FlashWindowEx`.
   - System Tray integration with minimize-to-tray, quick restore, and context menu.
   - Per-account mute toggle for uninterrupted focus.
-- **Performance & Resource Optimization**:
-  - **Memory Saver**: Suspends background WebView2 instances (`TrySuspendAsync`) to drastically cut RAM usage when idle.
-  - Single-instance startup enforcement with automatic focus restoration of running instance.
-  - Zoom controls (`-`, `100%`, `+`) with keyboard shortcuts.
+- **Intelligent WebView2 Lifecycle & Memory Management**:
+  - **Live RAM Monitor**: Real-time RAM widget tracking both WPF host and child `msedgewebview2.exe` renderer processes.
+  - **⚡ Trim RAM Button**: Instant memory optimization leveraging Win32 `SetProcessWorkingSetSize` and forced generation-2 garbage collection.
+  - **Tiered Background Inactivity Sleep**:
+    - **Light Suspend (10 min idle)**: Freezes JavaScript timers and suspends DOM rendering (`TrySuspendAsync`), slashing RAM consumption by 60–80%.
+    - **Deep Hibernation (30 min idle or manual)**: Completely disposes the `WebView2` control (0% RAM footprint) while preserving session state, cookies, and localStorage.
+  - **Instant Lazy Wakeup**: Recreates and navigates hibernated instances on demand upon selection or through the context menu.
+  - **Single-Instance Enforcement**: Named system mutex with Win32 broadcast restoration preventing duplicate resource consumption.
+  - **Zoom Controls**: Quick zoom adjustments (`-`, `100%`, `+`) with keyboard shortcuts.
 
 ---
 

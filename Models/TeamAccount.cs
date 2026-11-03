@@ -19,6 +19,14 @@ namespace MultiTeam.Models
         Custom
     }
 
+    public enum AccountLifecycleState
+    {
+        Active,
+        Ready,
+        Suspended,
+        Hibernated
+    }
+
     public class TeamAccount : INotifyPropertyChanged
     {
         private string _id = string.Empty;
@@ -224,6 +232,45 @@ namespace MultiTeam.Models
                 return char.ToUpper(trimmed[0]).ToString();
             }
         }
+
+        private AccountLifecycleState _lifecycleState = AccountLifecycleState.Ready;
+
+        [JsonIgnore]
+        public AccountLifecycleState LifecycleState
+        {
+            get => _lifecycleState;
+            set
+            {
+                if (_lifecycleState != value)
+                {
+                    _lifecycleState = value;
+                    OnPropertyChanged();
+                    OnPropertyChanged(nameof(IsSleeping));
+                    OnPropertyChanged(nameof(LifecycleBadge));
+                    OnPropertyChanged(nameof(LifecycleStatusText));
+                }
+            }
+        }
+
+        [JsonIgnore]
+        public bool IsSleeping => _lifecycleState == AccountLifecycleState.Suspended || _lifecycleState == AccountLifecycleState.Hibernated;
+
+        [JsonIgnore]
+        public string LifecycleBadge => _lifecycleState switch
+        {
+            AccountLifecycleState.Suspended => "💤",
+            AccountLifecycleState.Hibernated => "❄️",
+            _ => string.Empty
+        };
+
+        [JsonIgnore]
+        public string LifecycleStatusText => _lifecycleState switch
+        {
+            AccountLifecycleState.Active => "Đang mở",
+            AccountLifecycleState.Suspended => "Đang ngủ (RAM thấp)",
+            AccountLifecycleState.Hibernated => "Ngủ đông (0% RAM)",
+            _ => "Sẵn sàng"
+        };
 
         public event PropertyChangedEventHandler? PropertyChanged;
         protected void OnPropertyChanged([CallerMemberName] string? propertyName = null)
